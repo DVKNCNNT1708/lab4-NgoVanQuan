@@ -34,14 +34,40 @@ jobs:
             --env-file .env.example \
             fit4110/iot-ingestion:lab04
 
-      - name: Check container status
+      - name: Wait for container to be ready
         run: |
-          sleep 2
+          echo "Waiting for Docker container to start..."
+          sleep 5
+          
+          echo "Checking container status..."
           docker ps -a --filter "name=fit4110"
-          docker logs fit4110-iot-lab04
-
-      - name: Wait for service health
-        run: npx wait-on http://localhost:8000/health --timeout 60000 --httpTimeout 5000 --interval 1000
+          
+          echo "Container logs:"
+          docker logs fit4110-iot-lab04 | tail -20 || echo "No logs yet"
+          
+          echo "Waiting for health endpoint..."
+          TIMEOUT=120
+          ELAPSED=0
+          INTERVAL=2
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            echo "[$ELAPSED/$TIMEOUT] Checking http://localhost:8000/health..."
+            
+            if curl -s -f -m 5 http://localhost:8000/health > /dev/null 2>&1; then
+              echo "✓ Service is healthy!"
+              curl -s http://localhost:8000/health | head -20
+              exit 0
+            fi
+            
+            echo "Service not ready yet, retrying in ${INTERVAL}s..."
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          echo "✗ Timeout waiting for service health check"
+          echo "Final container logs:"
+          docker logs fit4110-iot-lab04 | tail -50
+          exit 1
 
       - name: Run Newman against Docker container
         run: npm run test:local
