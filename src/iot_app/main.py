@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone
 from enum import Enum
+from http import HTTPStatus
 from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -86,6 +87,14 @@ class SensorReadingCreated(BaseModel):
 READINGS: List[Dict] = []
 
 
+def get_status_text(status_code: int) -> str:
+    """Get HTTP status text from status code."""
+    try:
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return "HTTP Error"
+
+
 def build_problem(
     *,
     status_code: int,
@@ -107,27 +116,18 @@ def build_problem(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    if isinstance(exc.detail, dict):
-        problem = exc.detail
-    else:
-        problem = build_problem(
-            status_code=exc.status_code,
-            title=status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"),
-            detail=str(exc.detail),
-            instance=str(request.url.path),
-        )
-
-    problem.setdefault("status", exc.status_code)
-    problem.setdefault("title", status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"))
-    problem.setdefault("type", "about:blank")
-    problem.setdefault("detail", "Request failed")
-    problem.setdefault("instance", str(request.url.path))
+    problem = build_problem(
+        status_code=exc.status_code,
+        title=get_status_text(exc.status_code),
+        detail=str(exc.detail) if isinstance(exc.detail, str) else str(exc.detail.get("detail", "Request failed")),
+        instance=str(request.url.path),
+        problem_type="about:blank",
+    )
 
     return JSONResponse(
         status_code=exc.status_code,
         content=problem,
         media_type="application/problem+json",
-        headers=getattr(exc, "headers", None),
     )
 
 
@@ -157,24 +157,14 @@ def verify_bearer_token(authorization: Optional[str] = Header(default=None)) -> 
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=build_problem(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                title="Unauthorized",
-                detail="Missing Authorization header",
-                problem_type="https://smart-campus.local/problems/unauthorized",
-            ),
+            detail="Missing Authorization header",
         )
 
     expected = f"Bearer {AUTH_TOKEN}"
     if authorization != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=build_problem(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                title="Unauthorized",
-                detail="Invalid bearer token",
-                problem_type="https://smart-campus.local/problems/unauthorized",
-            ),
+            detail="Invalid bearer token",
         )
 
 
